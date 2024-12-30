@@ -1,82 +1,191 @@
-let video = document.getElementById('video');
-let canvas = document.getElementById('overlay');
-let ctx = canvas.getContext('2d');
-let captureButton = document.getElementById('capture-button');
-let model;
+/*jshint esversion:6*/
 
-// Initialize the video and model
-async function initialize() {
-    // Load the prediction model
-    model = await loadModel(); // Replace with actual model loading logic
+$(function () {
+    const { InferenceEngine, CVImage } = inferencejs;
+    const inferEngine = new InferenceEngine();
 
-    // Start video capture
-    await setupCamera();
-    video.play();
+    const video = $("video")[0];
 
-    document.body.classList.remove('loading');
-}
+    var workerId;
+    var cameraMode = "environment"; // or "user"
 
-// Set up camera
-async function setupCamera() {
-    const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
+    const startVideoStreamPromise = navigator.mediaDevices
+        .getUserMedia({
+            audio: false,
+            video: {
+                facingMode: cameraMode
+            }
+        })
+        .then(function (stream) {
+            return new Promise(function (resolve) {
+                video.srcObject = stream;
+                video.onloadeddata = function () {
+                    video.play();
+                    resolve();
+                };
+            });
+        });
+
+    const loadModelPromise = new Promise(function (resolve, reject) {
+        inferEngine
+            .startWorker("sign-vyotz", "2", "rf_8VWEzd82SjOgwThUCRgbrZviOaA3")
+            .then(function (id) {
+                workerId = id;
+                resolve();
+            })
+            .catch(reject);
     });
-    video.srcObject = stream;
 
-    return new Promise((resolve) => {
-        video.onloadedmetadata = () => {
-            resolve(video);
+    Promise.all([startVideoStreamPromise, loadModelPromise]).then(function () {
+        $("body").removeClass("loading");
+        resizeCanvas();
+        detectFrame();
+    });
+
+    var canvas, ctx;
+    const font = "16px sans-serif";
+
+    function videoDimensions(video) {
+        // Ratio of the video's intrisic dimensions
+        var videoRatio = video.videoWidth / video.videoHeight;
+
+        // The width and height of the video element
+        var width = video.offsetWidth,
+            height = video.offsetHeight;
+
+        // The ratio of the element's width to its height
+        var elementRatio = width / height;
+
+        // If the video element is short and wide
+        if (elementRatio > videoRatio) {
+            width = height * videoRatio;
+        } else {
+            // It must be tall and thin, or exactly equal to the original ratio
+            height = width / videoRatio;
+        }
+
+        return {
+            width: width,
+            height: height
         };
-    });
-}
-
-// Capture a frame from the video
-function captureFrame() {
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
-
-    // Stop the video stream
-    video.pause();
-    video.srcObject.getTracks().forEach((track) => track.stop());
-
-    // Draw the current frame onto the canvas
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL('image/png');
-}
-
-// Predict on the captured image
-async function predict(imageData) {
-    try {
-        const predictions = await model.predict(imageData); // Replace with actual prediction logic
-        displayPredictions(predictions);
-    } catch (error) {
-        console.error('Prediction failed:', error);
     }
-}
 
-// Display predictions
-function displayPredictions(predictions) {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    predictions.forEach((prediction) => {
-        // Draw bounding boxes or annotations
-        const { x, y, width, height, label, confidence } = prediction;
-
-        ctx.strokeStyle = 'red';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x, y, width, height);
-
-        ctx.fillStyle = 'white';
-        ctx.font = '16px Arial';
-        ctx.fillText(`${label} (${Math.round(confidence * 100)}%)`, x, y - 10);
+    $(window).resize(function () {
+        resizeCanvas();
     });
-}
 
-// Capture image and predict on button click
-captureButton.addEventListener('click', async () => {
-    const frame = captureFrame();
-    await predict(frame);
+    const resizeCanvas = function () {
+        $("canvas").remove();
+
+        canvas = $("<canvas/>");
+
+        ctx = canvas[0].getContext("2d");
+
+        var dimensions = videoDimensions(video);
+
+        console.log(
+            video.videoWidth,
+            video.videoHeight,
+            video.offsetWidth,
+            video.offsetHeight,
+            dimensions
+        );
+
+        canvas[0].width = video.videoWidth;
+        canvas[0].height = video.videoHeight;
+
+        canvas.css({
+            width: dimensions.width,
+            height: dimensions.height,
+            left: ($(window).width() - dimensions.width) / 2,
+            top: ($(window).height() - dimensions.height) / 2
+        });
+
+        $("body").append(canvas);
+    };
+
+    const renderPredictions = function (predictions) {
+        var scale = 1;
+
+        ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+        predictions.forEach(function (prediction) {
+            const x = prediction.bbox.x;
+            const y = prediction.bbox.y;
+
+            const width = prediction.bbox.width;
+            const height = prediction.bbox.height;
+
+            // Draw the bounding box.
+            ctx.strokeStyle = prediction.color;
+            ctx.lineWidth = 4;
+            ctx.strokeRect(
+                (x - width / 2) / scale,
+                (y - height / 2) / scale,
+                width / scale,
+                height / scale
+            );
+
+            // Draw the label background.
+            ctx.fillStyle = prediction.color;
+            const textWidth = ctx.measureText(prediction.class).width;
+            const textHeight = parseInt(font, 10); // base 10
+            ctx.fillRect(
+                (x - width / 2) / scale,
+                (y - height / 2) / scale,
+                textWidth + 8,
+                textHeight + 4
+            );
+        });
+
+        predictions.forEach(function (prediction) {
+            const x = prediction.bbox.x;
+            const y = prediction.bbox.y;
+
+            const width = prediction.bbox.width;
+            const height = prediction.bbox.height;
+
+            // Draw the text last to ensure it's on top.
+            ctx.font = font;
+            ctx.textBaseline = "top";
+            ctx.fillStyle = "#000000";
+            ctx.fillText(
+                prediction.class,
+                (x - width / 2) / scale + 4,
+                (y - height / 2) / scale + 1
+            );
+        });
+    };
+
+    var prevTime;
+    var pastFrameTimes = [];
+    const detectFrame = function () {
+        if (!workerId) return requestAnimationFrame(detectFrame);
+
+        const image = new CVImage(video);
+        inferEngine
+            .infer(workerId, image)
+            .then(function (predictions) {
+                requestAnimationFrame(detectFrame);
+                renderPredictions(predictions);
+
+                if (prevTime) {
+                    pastFrameTimes.push(Date.now() - prevTime);
+                    if (pastFrameTimes.length > 30) pastFrameTimes.shift();
+
+                    var total = 0;
+                    _.each(pastFrameTimes, function (t) {
+                        total += t / 1000;
+                    });
+
+                    var fps = pastFrameTimes.length / total;
+                    $("#fps").text(Math.round(fps));
+                }
+                prevTime = Date.now();
+            })
+            .catch(function (e) {
+                console.log("CAUGHT", e);
+                requestAnimationFrame(detectFrame);
+            });
+    };
 });
-
-// Start the application
-initialize();
