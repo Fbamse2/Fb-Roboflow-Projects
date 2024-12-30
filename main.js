@@ -1,124 +1,79 @@
-/*jshint esversion:8*/
+let video = document.getElementById('video');
+let canvas = document.getElementById('overlay');
+let ctx = canvas.getContext('2d');
+let model;
 
-$(document).ready(() => {
-    const { InferenceEngine, CVImage } = inferencejs;
-    const inferEngine = new InferenceEngine();
+// Initialize the video and model
+async function initialize() {
+    // Load the prediction model
+    model = await loadModel(); // Replace with actual model loading logic
 
-    const video = $("#video")[0];
-    const canvas = $("#overlay")[0];
-    const ctx = canvas.getContext("2d");
-    const photoCanvas = document.createElement("canvas");
-    const photoCtx = photoCanvas.getContext("2d");
+    // Start video capture
+    await setupCamera();
+    video.play();
 
-    let workerId = null;
-    const font = "16px sans-serif";
+    document.body.classList.remove('loading');
+    loopCaptureAndPredict();
+}
 
-    const initializeVideoStream = async () => {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            audio: false,
-            video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
-        });
-        video.srcObject = stream;
+// Set up camera
+async function setupCamera() {
+    const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' },
+    });
+    video.srcObject = stream;
 
-        return new Promise((resolve) => {
-            video.onloadeddata = () => {
-                video.play();
-                resolve();
-            };
-        });
-    };
+    return new Promise((resolve) => {
+        video.onloadedmetadata = () => {
+            resolve(video);
+        };
+    });
+}
 
-    const initializeModel = async () => {
-        workerId = await inferEngine.startWorker(
-            "sign-vyotz",
-            "2",
-            "rf_8VWEzd82SjOgwThUCRgbrZviOaA3"
-        );
-    };
+// Capture a frame from the video
+function captureFrame() {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/png');
+}
 
-    const resizeCanvas = () => {
-        const videoRatio = video.videoWidth / video.videoHeight;
-        const windowRatio = $(window).width() / $(window).height();
+// Predict on the captured image
+async function predict(imageData) {
+    try {
+        const predictions = await model.predict(imageData); // Replace with actual prediction logic
+        displayPredictions(predictions);
+    } catch (error) {
+        console.error('Prediction failed:', error);
+    }
+}
 
-        let canvasWidth, canvasHeight;
-        if (windowRatio > videoRatio) {
-            canvasHeight = $(window).height();
-            canvasWidth = canvasHeight * videoRatio;
-        } else {
-            canvasWidth = $(window).width();
-            canvasHeight = canvasWidth / videoRatio;
-        }
+// Display predictions
+function displayPredictions(predictions) {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
+    predictions.forEach((prediction) => {
+        // Draw bounding boxes or annotations
+        const { x, y, width, height, label, confidence } = prediction;
 
-        $(canvas).css({
-            width: canvasWidth,
-            height: canvasHeight,
-            position: "absolute",
-            left: ($(window).width() - canvasWidth) / 2,
-            top: ($(window).height() - canvasHeight) / 2
-        });
-    };
+        ctx.strokeStyle = 'red';
+        ctx.lineWidth = 2;
+        ctx.strokeRect(x, y, width, height);
 
-    const capturePhoto = () => {
-        // Capture a single frame from the video
-        photoCanvas.width = video.videoWidth;
-        photoCanvas.height = video.videoHeight;
-        photoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+        ctx.fillStyle = 'white';
+        ctx.font = '16px Arial';
+        ctx.fillText(`${label} (${Math.round(confidence * 100)}%)`, x, y - 10);
+    });
+}
 
-        return new CVImage(photoCanvas);
-    };
+// Capture, predict, and repeat in a loop
+async function loopCaptureAndPredict() {
+    while (true) {
+        const frame = captureFrame();
+        await predict(frame);
+        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before next capture
+    }
+}
 
-    const renderPredictions = (predictions) => {
-        ctx.clearRect(0, 0, canvas.width, canvas.height);
-        ctx.font = font;
-
-        predictions.forEach(({ bbox, class: label, color }) => {
-            const { x, y, width, height } = bbox;
-            ctx.strokeStyle = color;
-            ctx.lineWidth = 4;
-
-            // Draw bounding box
-            ctx.strokeRect(x - width / 2, y - height / 2, width, height);
-
-            // Draw label
-            ctx.fillStyle = color;
-            ctx.fillRect(x - width / 2, y - height / 2 - 20, ctx.measureText(label).width + 8, 20);
-            ctx.fillStyle = "#000000";
-            ctx.fillText(label, x - width / 2 + 4, y - height / 2 - 18);
-        });
-    };
-
-    const processPhoto = async () => {
-        if (!workerId) return;
-
-        const image = capturePhoto();
-        try {
-            const predictions = await inferEngine.infer(workerId, image);
-            renderPredictions(predictions);
-        } catch (error) {
-            console.error("Inference Error:", error);
-        }
-    };
-
-    // Initialize application
-    (async () => {
-        try {
-            await initializeVideoStream();
-            await initializeModel();
-            $("body").removeClass("loading");
-            resizeCanvas();
-
-            $(window).resize(resizeCanvas);
-
-            // Attach photo capture to a button
-            $("#captureButton").on("click", () => {
-                processPhoto();
-            });
-        } catch (error) {
-            console.error("Initialization Error:", error);
-            $("#fps").text("Error initializing application.");
-        }
-    })();
-});
+// Start the application
+initialize();
