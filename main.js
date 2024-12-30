@@ -34,6 +34,12 @@ async function setupCamera() {
 function captureFrame() {
     canvas.width = video.videoWidth;
     canvas.height = video.videoHeight;
+
+    // Stop the video stream
+    video.pause();
+    video.srcObject.getTracks().forEach((track) => track.stop());
+
+    // Draw the current frame onto the canvas
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
     return canvas.toDataURL('image/png');
 }
