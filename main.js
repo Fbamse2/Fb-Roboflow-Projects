@@ -12,11 +12,13 @@ $(document).ready(() => {
     let prevTime = null;
     const frameTimes = [];
     const font = "16px sans-serif";
+    let frameSkip = 2; // Skip every alternate frame for better performance
+    let frameCount = 0;
 
     const initializeVideoStream = async () => {
         const stream = await navigator.mediaDevices.getUserMedia({
             audio: false,
-            video: { facingMode: "environment" }
+            video: { facingMode: "environment", width: { ideal: 640 }, height: { ideal: 480 } }
         });
         video.srcObject = stream;
 
@@ -93,6 +95,12 @@ $(document).ready(() => {
 
     const detectFrame = async () => {
         if (!workerId) return requestAnimationFrame(detectFrame);
+
+        frameCount++;
+        if (frameCount % frameSkip !== 0) {
+            requestAnimationFrame(detectFrame);
+            return;
+        }
 
         const image = new CVImage(video);
         try {
