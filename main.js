@@ -1,6 +1,7 @@
 let video = document.getElementById('video');
 let canvas = document.getElementById('overlay');
 let ctx = canvas.getContext('2d');
+let captureButton = document.getElementById('capture-button');
 let model;
 
 // Initialize the video and model
@@ -13,7 +14,6 @@ async function initialize() {
     video.play();
 
     document.body.classList.remove('loading');
-    loopCaptureAndPredict();
 }
 
 // Set up camera
@@ -66,14 +66,11 @@ function displayPredictions(predictions) {
     });
 }
 
-// Capture, predict, and repeat in a loop
-async function loopCaptureAndPredict() {
-    while (true) {
-        const frame = captureFrame();
-        await predict(frame);
-        await new Promise((resolve) => setTimeout(resolve, 1000)); // Wait 1 second before next capture
-    }
-}
+// Capture image and predict on button click
+captureButton.addEventListener('click', async () => {
+    const frame = captureFrame();
+    await predict(frame);
+});
 
 // Start the application
 initialize();
