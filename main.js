@@ -7,13 +7,11 @@ $(document).ready(() => {
     const video = $("#video")[0];
     const canvas = $("#overlay")[0];
     const ctx = canvas.getContext("2d");
+    const photoCanvas = document.createElement("canvas");
+    const photoCtx = photoCanvas.getContext("2d");
 
     let workerId = null;
-    let prevTime = null;
-    const frameTimes = [];
     const font = "16px sans-serif";
-    let frameSkip = 2; // Skip every alternate frame for better performance
-    let frameCount = 0;
 
     const initializeVideoStream = async () => {
         const stream = await navigator.mediaDevices.getUserMedia({
@@ -36,16 +34,6 @@ $(document).ready(() => {
             "2",
             "rf_8VWEzd82SjOgwThUCRgbrZviOaA3"
         );
-    };
-
-    const calculateFPS = () => {
-        if (!prevTime) return;
-        frameTimes.push(Date.now() - prevTime);
-        if (frameTimes.length > 30) frameTimes.shift();
-
-        const total = frameTimes.reduce((acc, t) => acc + t / 1000, 0);
-        const fps = Math.round(frameTimes.length / total);
-        $("#fps").text(`FPS: ${fps}`);
     };
 
     const resizeCanvas = () => {
@@ -73,6 +61,15 @@ $(document).ready(() => {
         });
     };
 
+    const capturePhoto = () => {
+        // Capture a single frame from the video
+        photoCanvas.width = video.videoWidth;
+        photoCanvas.height = video.videoHeight;
+        photoCtx.drawImage(video, 0, 0, video.videoWidth, video.videoHeight);
+
+        return new CVImage(photoCanvas);
+    };
+
     const renderPredictions = (predictions) => {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         ctx.font = font;
@@ -93,25 +90,15 @@ $(document).ready(() => {
         });
     };
 
-    const detectFrame = async () => {
-        if (!workerId) return requestAnimationFrame(detectFrame);
+    const processPhoto = async () => {
+        if (!workerId) return;
 
-        frameCount++;
-        if (frameCount % frameSkip !== 0) {
-            requestAnimationFrame(detectFrame);
-            return;
-        }
-
-        const image = new CVImage(video);
+        const image = capturePhoto();
         try {
             const predictions = await inferEngine.infer(workerId, image);
             renderPredictions(predictions);
-            calculateFPS();
         } catch (error) {
             console.error("Inference Error:", error);
-        } finally {
-            prevTime = Date.now();
-            requestAnimationFrame(detectFrame);
         }
     };
 
@@ -122,9 +109,13 @@ $(document).ready(() => {
             await initializeModel();
             $("body").removeClass("loading");
             resizeCanvas();
-            detectFrame();
 
             $(window).resize(resizeCanvas);
+
+            // Attach photo capture to a button
+            $("#captureButton").on("click", () => {
+                processPhoto();
+            });
         } catch (error) {
             console.error("Initialization Error:", error);
             $("#fps").text("Error initializing application.");
